@@ -11,10 +11,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,10 +21,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Find Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> $GITHUB_ENV
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+          echo "SDKMANAGER=$SDKMANAGER" >> $GITHUB_ENV
+          echo "Found: $SDKMANAGER"
+
       - name: Install Android SDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses
-          "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -37,18 +45,23 @@ jobs:
 
       - name: Extract project
         run: |
-          unzip WaveTalk.zip -d extracted
-          find extracted \( -name settings.gradle.kts -o -name settings.gradle \)
+          unzip -q WaveTalk.zip -d extracted
+          find extracted \( -name settings.gradle -o -name settings.gradle.kts \)
 
       - name: Build APK
         run: |
-          PROJECT_DIR=$(dirname "$(find extracted \( -name settings.gradle.kts -o -name settings.gradle \) | head -n 1)")
-          test -f "$PROJECT_DIR/build.gradle" -o -f "$PROJECT_DIR/build.gradle.kts"
+          SETTINGS=$(find extracted \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1)
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Gradle settings file not found in ZIP"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SETTINGS")
           cd "$PROJECT_DIR"
-          gradle assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace --info
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: WAVE-TALK-APK
           path: extracted/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
